@@ -11,10 +11,10 @@ pub struct Range {
   pub subnet: IpNetwork,
 
   #[serde(default, skip_serializing_if = "Option::is_none")]
-  pub range_start: Option<IpAddr>,
+  pub start: Option<IpAddr>,
 
   #[serde(default, skip_serializing_if = "Option::is_none")]
-  pub range_end: Option<IpAddr>,
+  pub end: Option<IpAddr>,
 
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub gateway: Option<IpAddr>,
@@ -27,37 +27,40 @@ pub enum RangeError {
 
   #[error("Network address of subnet {0} should be {1}")]
   WrongNetworkAddr(IpNetwork, IpAddr),
+
+  #[error("IP {1} is out of network {0}")]
+  OutOfRangeIp(IpNetwork, IpAddr),
 }
 
 impl Range {
   /// Naive implementation of iterating the IP range.
   ///
   /// This iterator will yield every IP available in the range, that is, every
-  /// IP in the subnet, except those lower than `range_start`, higher than
-  /// `range_end`, or the one which is the `gateway`.
+  /// IP in the subnet, except those lower than `start`, higher than
+  /// `end`, or the one which is the `gateway`.
   ///
   /// The current implementation iterates through the entire range and filters
   /// off the excluded IPs as per above. For IPv4 this will likely never be an
   /// issue but IPv6 ranges are monstrous and could spend a long time spinning
-  /// before reaching `range_start`.
+  /// before reaching `start`.
   pub fn iter_free(&self) -> impl Iterator<Item = IpNetwork> {
     let prefix = self.subnet.prefix();
-    let range_start = self.range_start;
-    let range_end = self.range_end;
+    let start = self.start;
+    let end = self.end;
     let gateway = self.gateway;
 
     self
       .subnet
       .iter()
       .filter(move |ip| {
-        if let Some(ref start) = range_start {
+        if let Some(ref start) = start {
           if ip < start {
             // TODO: figure out how to START from there instead
             return false;
           }
         }
 
-        if let Some(ref end) = range_end {
+        if let Some(ref end) = end {
           if ip > end {
             // TODO: figure out how to stop the iterator there instead
             return false;
@@ -76,6 +79,7 @@ impl Range {
     // UNWRAP: panics on invalid prefix, but we got it from another IpNetwork
   }
 
+  /// canonicalize check all fields and fill start/end/gateway if empty
   pub fn canonicalize(&mut self) -> Result<(), RangeError> {
     use RangeError::*;
 
@@ -87,13 +91,61 @@ impl Range {
       return Err(WrongNetworkAddr(self.subnet, self.subnet.network()));
     }
 
+    // todo: out of range check
     if self.gateway == None {
       let mut iter = self.subnet.iter();
       let _ = iter.next();
       self.gateway = iter.next();
     }
 
+    match self.start {
+      Some(ip) => {
+        if !self.subnet.contains(ip) {
+          return Err(RangeError::OutOfRangeIp(self.subnet, ip));
+        }
+      }
+      None => {
+        let mut iter = self.subnet.iter();
+        let _ = iter.next();
+        self.start = iter.next();
+      }
+    };
+
+    match self.end {
+      Some(ip) => {
+        if !self.subnet.contains(ip) {
+          return Err(RangeError::OutOfRangeIp(self.subnet, ip));
+        }
+      }
+      None => self.end = Some(self.last_ip()),
+    };
+
     Ok(())
+  }
+
+  fn last_ip(&self) -> IpAddr {
+    match self.subnet {
+      IpNetwork::V4(subnet) => {
+        let mut octets = subnet.ip().octets();
+        let mask = subnet.mask().octets();
+
+        for i in 0..octets.len() {
+          octets[i] = octets[i] | (!mask[i])
+        }
+        octets[3] -= 1;
+
+        IpAddr::from(octets)
+      }
+      IpNetwork::V6(subnet) => {
+        let mut segments = subnet.ip().segments();
+        let mask = subnet.mask().segments();
+
+        for i in 0..segments.len() {
+          segments[i] = segments[i] | (!mask[i])
+        }
+        IpAddr::from(segments)
+      }
+    }
   }
 }
 
@@ -105,8 +157,8 @@ mod tests {
   fn range_iter() {
     let range = Range {
       subnet: "10.1.9.32/16".parse().unwrap(),
-      range_start: Some(IpAddr::from_str("10.1.0.1").unwrap()),
-      range_end: Some(IpAddr::from_str("10.1.0.5").unwrap()),
+      start: Some(IpAddr::from_str("10.1.0.1").unwrap()),
+      end: Some(IpAddr::from_str("10.1.0.5").unwrap()),
       gateway: Some(IpAddr::from_str("10.1.0.4").unwrap()),
     };
 
@@ -122,8 +174,8 @@ mod tests {
   fn range_iter_with_subnet_only() {
     let range = Range {
       subnet: "10.1.9.32/16".parse().unwrap(),
-      range_start: None,
-      range_end: None,
+      start: None,
+      end: None,
       gateway: None,
     };
 
@@ -137,8 +189,8 @@ mod tests {
     let network = "10.1.9.32/31".parse().unwrap();
     let mut range = Range {
       subnet: network,
-      range_start: None,
-      range_end: None,
+      start: None,
+      end: None,
       gateway: None,
     };
     assert_eq!(
@@ -149,8 +201,8 @@ mod tests {
     let network = "10.1.9.32/32".parse().unwrap();
     let mut range = Range {
       subnet: network,
-      range_start: None,
-      range_end: None,
+      start: None,
+      end: None,
       gateway: None,
     };
     assert_eq!(
@@ -164,8 +216,8 @@ mod tests {
     let network = "2.2.2.1/16".parse().unwrap();
     let mut range = Range {
       subnet: network,
-      range_start: None,
-      range_end: None,
+      start: None,
+      end: None,
       gateway: None,
     };
 
@@ -179,11 +231,103 @@ mod tests {
   fn canonicalize_empty_gateway_ip() {
     let mut range = Range {
       subnet: "2.2.0.0/16".parse().unwrap(),
-      range_start: None,
-      range_end: None,
+      start: None,
+      end: None,
       gateway: None,
     };
     let _ = range.canonicalize();
     assert_eq!(range.gateway, "2.2.0.1".parse::<IpAddr>().ok());
+  }
+
+  #[test]
+  fn canonicalize_start() {
+    let start = "2.2.0.1".parse().unwrap();
+    let mut range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: Some(start),
+      end: None,
+      gateway: None,
+    };
+
+    assert!(range.canonicalize().is_ok());
+    assert_eq!(range.start.unwrap(), start);
+  }
+
+  #[test]
+  fn canonicalize_none_start() {
+    let mut range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: None,
+      end: None,
+      gateway: None,
+    };
+
+    assert!(range.canonicalize().is_ok());
+    assert_eq!(range.start, "2.2.0.1".parse().ok());
+  }
+
+  #[test]
+  fn canonicalize_out_of_range_start() {
+    let start = "2.1.255.255".parse().unwrap();
+    let subnet = "2.2.0.0/16".parse().unwrap();
+
+    let mut range = Range {
+      subnet: subnet,
+      start: Some(start),
+      end: None,
+      gateway: None,
+    };
+
+    assert!(range.canonicalize().is_err());
+    assert_eq!(
+      range.canonicalize(),
+      Err(RangeError::OutOfRangeIp(subnet, start))
+    );
+  }
+
+  #[test]
+  fn canonicalize_end() {
+    let start = "2.2.0.1".parse().unwrap();
+    let end = "2.2.255.254".parse().unwrap();
+    let mut range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: Some(start),
+      end: Some(end),
+      gateway: None,
+    };
+
+    assert!(range.canonicalize().is_ok());
+    assert_eq!(range.end.unwrap(), end);
+  }
+
+  #[test]
+  fn canonicalize_end_is_none() {
+    let start = "2.2.0.1".parse().unwrap();
+    let mut range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: Some(start),
+      end: None,
+      gateway: None,
+    };
+
+    assert!(range.canonicalize().is_ok());
+    assert_eq!(range.end.unwrap(), "2.2.255.254".parse::<IpAddr>().unwrap());
+  }
+
+  #[test]
+  fn canonicalize_end_out_of_range() {
+    let start = "2.2.0.1".parse().unwrap();
+    let end = "2.3.0.1".parse().unwrap();
+    let mut range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: Some(start),
+      end: Some(end),
+      gateway: None,
+    };
+
+    assert_eq!(
+      range.canonicalize(),
+      Err(RangeError::OutOfRangeIp(range.subnet, end))
+    );
   }
 }

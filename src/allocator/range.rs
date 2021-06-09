@@ -147,6 +147,26 @@ impl Range {
       }
     }
   }
+
+  fn contains(&self, ip: IpAddr) -> bool {
+    if !self.subnet.contains(ip) {
+      return false;
+    }
+
+    if let Some(start) = self.start {
+      if start > ip {
+        return false;
+      }
+    }
+
+    if let Some(end) = self.end {
+      if end < ip {
+        return false;
+      }
+    }
+
+    return true;
+  }
 }
 
 #[cfg(test)]
@@ -329,5 +349,33 @@ mod tests {
       range.canonicalize(),
       Err(RangeError::OutOfRangeIp(range.subnet, end))
     );
+  }
+
+  #[test]
+  fn contains_ip() {
+    let range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: None,
+      end: None,
+      gateway: None,
+    };
+
+    assert!(range.contains("2.2.0.1".parse().unwrap()));
+    assert!(range.contains("2.2.255.254".parse().unwrap()));
+    assert!(!range.contains("2.1.255.255".parse().unwrap()));
+    assert!(!range.contains("2.3.0.0".parse().unwrap()));
+
+    let range = Range {
+      subnet: "2.2.0.0/16".parse().unwrap(),
+      start: Some("2.2.2.100".parse().unwrap()),
+      end: Some("2.2.2.105".parse().unwrap()),
+      gateway: None,
+    };
+
+    assert!(range.contains("2.2.2.100".parse().unwrap()));
+    assert!(range.contains("2.2.2.105".parse().unwrap()));
+
+    assert!(!range.contains("2.2.1.99".parse().unwrap()));
+    assert!(!range.contains("2.2.2.106".parse().unwrap()));
   }
 }

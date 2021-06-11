@@ -1,4 +1,4 @@
-mod range;
+pub mod range;
 
 pub fn test() {
   println!("hellow")

@@ -1,4 +1,5 @@
 use std::cmp::PartialEq;
+use std::fmt;
 use std::net::IpAddr;
 
 use ipnetwork::IpNetwork;
@@ -101,7 +102,8 @@ impl Range {
   fn canonicalize(&mut self) -> Result<(), RangeError> {
     use RangeError::*;
 
-    if self.subnet.prefix() > 30 {
+    // todo: ipv6 check
+    if self.subnet.is_ipv4() && self.subnet.prefix() > 30 {
       return Err(TooSmallNetwork(self.subnet));
     }
 
@@ -195,18 +197,16 @@ impl Range {
       return false;
     }
 
-    if self.start.is_none()
-      || self.end.is_none()
-      || other_range.start.is_none()
-      || other_range.end.is_none()
-    {
-      return false;
-    }
-
     return self.contains(other_range.start.unwrap())
       || self.contains(other_range.end.unwrap())
       || other_range.contains(self.start.unwrap())
       || other_range.contains(self.end.unwrap());
+  }
+}
+
+impl fmt::Display for Range {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "({}, {})", self.start.unwrap(), self.end.unwrap())
   }
 }
 
@@ -351,7 +351,22 @@ mod tests {
 
   #[test]
   fn overlaps() {
-    let range = Range::new("2.2.0.0/16".parse().unwrap(), None, None, None);
-    let range2 = Range::new("2.2.0.0/16".parse().unwrap(), None, None, None);
+    let range = Range::new("2.0.0.0/8".parse().unwrap(), None, None, None).unwrap();
+    let range2 = Range::new("2.2.0.0/16".parse().unwrap(), None, None, None).unwrap();
+    assert!(range.overlaps(&range2));
+
+    let range = Range::new("2.0.0.0/8".parse().unwrap(), None, None, None).unwrap();
+    let range2 = Range::new(
+      "2001:db8:abcd:0012::0/64".parse().unwrap(),
+      None,
+      None,
+      None,
+    )
+    .unwrap();
+    assert!(!range.overlaps(&range2));
+
+    let range = Range::new("2.2.0.0/16".parse().unwrap(), None, None, None).unwrap();
+    let range2 = Range::new("2.3.0.0/16".parse().unwrap(), None, None, None).unwrap();
+    assert!(!range.overlaps(&range2));
   }
 }

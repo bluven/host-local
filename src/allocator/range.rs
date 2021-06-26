@@ -5,7 +5,7 @@ use std::net::IpAddr;
 use ipnetwork::IpNetwork;
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Range {
   subnet: IpNetwork,
   start: IpAddr,
@@ -161,11 +161,16 @@ impl Range {
     return true;
   }
 
-  pub fn overlaps(&self, other_range: &Self) -> bool {
-    let is_same_familiy = (self.subnet.ip().is_ipv4() && other_range.subnet.ip().is_ipv4())
-      || (self.subnet.ip().is_ipv6() && other_range.subnet.ip().is_ipv6());
+  pub fn is_same_familiy(&self, other: &Self) -> bool {
+    match (self.subnet.ip(), other.subnet.ip()) {
+      (IpAddr::V4(_), IpAddr::V4(_)) => true,
+      (IpAddr::V6(_), IpAddr::V6(_)) => true,
+      _ => false,
+    }
+  }
 
-    if !is_same_familiy {
+  pub fn overlaps(&self, other_range: &Self) -> bool {
+    if !self.is_same_familiy(other_range) {
       return false;
     }
 
@@ -186,6 +191,7 @@ impl fmt::Display for Range {
 mod tests {
   use super::*;
   use std::str::FromStr;
+
   #[test]
   fn range_iter() {
     let range = Range::new(

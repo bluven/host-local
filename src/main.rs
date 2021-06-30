@@ -1,8 +1,10 @@
 mod allocator;
+mod store;
 
-use allocator::test;
+use allocator::{range::Range, range::RangeError, test};
 
 fn main() {
     test();
-    println!("Hello, world!");
+    let range = Range::new("2.2.0.0/16".parse().unwrap(), None, None, None).unwrap();
+    println!("{}", range);
 }

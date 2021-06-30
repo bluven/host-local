@@ -1,7 +1,7 @@
 mod allocator;
 mod store;
 
-use allocator::{range::Range, range::RangeError, test};
+use allocator::{range::Range, test};
 
 fn main() {
     test();

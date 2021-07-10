@@ -4,6 +4,7 @@ use std::io::{Error as IoError, ErrorKind, Write};
 use std::net::IpAddr;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use walkdir::{DirEntry, WalkDir};
 
 const LAST_IP_FILE_PREFIX: &str = "last_reserved_ip";
 const DEFAULT_DATA_DIR: &str = "/var/lib/cni/networks";
@@ -25,7 +26,7 @@ impl FileStore {
 
     create_dir_all(&path)
       .map(|_| FileStore { data_dir: path })
-      .map_err(|err| StoreError::IOError(err))
+      .map_err(StoreError::IOError)
   }
 
   fn record_last_reserved_ip(&self, ip: IpAddr, range_id: &str) -> Result<(), IoError> {
@@ -103,28 +104,65 @@ impl Store for FileStore {
     self
       .record_last_reserved_ip(ip, range_id)
       .map(|_| true)
-      .map_err(|err| StoreError::IOError(err))
+      .map_err(StoreError::IOError)
   }
 
   fn last_reserved_ip(&self, range_id: &str) -> Result<IpAddr, StoreError> {
     let path = self.get_last_reserved_ip_filepath(range_id);
 
     read_to_string(path)
-      .map_err(|err| StoreError::IOError(err))?
+      .map_err(StoreError::IOError)?
       .parse::<IpAddr>()
-      .map_err(|err| StoreError::AddrParseError(err))
+      .map_err(StoreError::AddrParseError)
   }
 
   fn release(&self, ip: IpAddr) -> Result<(), StoreError> {
-    return Ok(());
+    let path = self.data_dir.join(ip.to_string());
+    remove_file(path).map_err(StoreError::IOError)
   }
 
   fn release_by_id(&self, id: &str, ifname: &str) -> Result<(), StoreError> {
-    return Ok(());
+    let key = format!("{}{}{}", id, LINE_BREAK, ifname);
+
+    for entry in WalkDir::new(&self.data_dir)
+      .into_iter()
+      .filter_map(|e| e.ok())
+      .filter(|e| e.file_type().is_file())
+    {
+      let matched = read_to_string(entry.path())
+        .map_err(StoreError::IOError)
+        .map(|data| data.contains(&key))?;
+
+      if matched {
+        remove_file(entry.path()).map_err(StoreError::IOError)?
+      }
+    }
+
+    Ok(())
   }
 
   fn get_by_id(&self, id: &str, ifname: &str) -> Vec<IpAddr> {
-    return vec![];
+    let key = format!("{}{}{}", id, LINE_BREAK, ifname);
+    let has_key =
+      |entry: &DirEntry| read_to_string(entry.path()).map_or(false, |data| data.contains(&key));
+
+    let get_ip_from_path = |entry: DirEntry| {
+      entry
+        .path()
+        .file_name()
+        .map(|s| s.to_str())
+        .flatten()
+        .map(|s| s.parse::<IpAddr>().ok())
+        .flatten()
+    };
+
+    WalkDir::new(&self.data_dir)
+      .into_iter()
+      .filter_map(|e| e.ok())
+      .filter(|e| e.file_type().is_file())
+      .filter(has_key)
+      .filter_map(get_ip_from_path)
+      .collect()
   }
 }
 
@@ -136,33 +174,27 @@ mod tests {
   use std::net::IpAddr;
   use std::path::Path;
 
-  struct Setup;
-
-  impl Drop for Setup {
-    fn drop(&mut self) {
-      let _ = remove_dir_all("/tmp/cni");
-    }
+  fn clean_data_dir() {
+    let _ = remove_dir_all("/tmp/cni");
   }
 
   #[test]
   fn new() {
-    let _ = Setup;
-
-    let result = FileStore::new("test", "/tmp/cni");
+    let result = FileStore::new("test", "/tmp/cni/networks");
     assert!(result.is_ok());
-    assert!(Path::new("/tmp/cni/test").exists());
+    assert!(Path::new("/tmp/cni/networks/test").exists());
 
     let result = FileStore::new("test", "");
     assert!(result
       .unwrap_err()
       .to_string()
       .contains("io error happened: "));
+
+    clean_data_dir();
   }
 
   #[test]
-  fn reserve() {
-    let _ = Setup;
-
+  fn reserve_and_last_reserved_ip() {
     let cni_data_dir = "/tmp/cni/networks";
     let store = FileStore::new("test", cni_data_dir).unwrap();
 
@@ -176,5 +208,45 @@ mod tests {
 
     let result = store.reserve(id, ifname, ip, range_id);
     assert!(!result.unwrap(), "{} should not be reserved again", ip);
+
+    let result = store.last_reserved_ip(range_id);
+    assert_eq!(result.unwrap(), ip);
+
+    assert!(
+      store
+        .last_reserved_ip("2")
+        .unwrap_err()
+        .to_string()
+        .contains("io error happened: "),
+      "an io error should happened"
+    );
+
+    let ips = store.get_by_id(id, ifname);
+    assert_eq!(ips.len(), 1);
+    assert_eq!(ips[0], ip);
+
+    assert!(store.release(ip).is_ok());
+    assert!(!store.data_dir.join(ip.to_string()).exists());
+
+    clean_data_dir();
+  }
+
+  #[test]
+  fn release_by_id() {
+    let cni_data_dir = "/tmp/cni/networks";
+    let store = FileStore::new("test", cni_data_dir).unwrap();
+
+    let id = "123456";
+    let ifname = "enp2s0";
+    let ip = "2.2.2.2".parse::<IpAddr>().unwrap();
+    let range_id = "1";
+
+    let result = store.reserve(id, ifname, ip, range_id);
+    assert!(result.unwrap(), "{} should be reserved", ip);
+
+    assert!(store.release_by_id(id, ifname).is_ok());
+    assert!(!store.data_dir.join(ip.to_string()).exists());
+
+    clean_data_dir();
   }
 }

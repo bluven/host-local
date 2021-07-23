@@ -11,3 +11,4 @@ serde = { version = "1.0.123", features = ["derive"] }
 ipnetwork = "0.17.0"
 thiserror = "1"
 walkdir = "2"
+num-bigint = "0.4"

@@ -7,10 +7,10 @@ use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Range {
-    subnet: IpNetwork,
-    start: IpAddr,
-    end: IpAddr,
-    gateway: IpAddr,
+    pub subnet: IpNetwork,
+    pub start: IpAddr,
+    pub end: IpAddr,
+    pub gateway: IpAddr,
 }
 
 #[derive(Debug, Error, PartialEq)]

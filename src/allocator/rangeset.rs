@@ -36,6 +36,10 @@ impl RangeSet {
         return Err(RangeSetError::NoRangeForIP(ip));
     }
 
+    pub fn get(&mut self, index: usize) -> Option<&Range> {
+        return self.ranges.get(index);
+    }
+
     pub fn add(&mut self, range: Range) -> Result<(), RangeSetError> {
         if self.ranges.len() > 0 {
             if !self.ranges[0].is_same_familiy(&range) {
@@ -61,6 +65,10 @@ impl RangeSet {
         }
 
         return false;
+    }
+
+    pub fn len(&self) -> usize {
+        self.ranges.len()
     }
 }
 

@@ -70,6 +70,10 @@ impl RangeSet {
     pub fn len(&self) -> usize {
         self.ranges.len()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Range> {
+        self.ranges.iter()
+    }
 }
 
 #[cfg(test)]

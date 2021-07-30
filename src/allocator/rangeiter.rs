@@ -6,10 +6,10 @@ use std::convert::TryFrom;
 use std::net::IpAddr;
 
 pub struct RangeIter {
-  range_set: RangeSet,
-  range_index: usize,
-  current_ip: Option<IpAddr>,
-  start_ip: Option<IpAddr>,
+  pub range_set: RangeSet,
+  pub range_index: usize,
+  pub current_ip: Option<IpAddr>,
+  pub start_ip: Option<IpAddr>,
 }
 
 impl Iterator for RangeIter {
@@ -106,12 +106,17 @@ mod tests {
       start_ip: None,
     };
 
-    let result = ri.next();
-    assert!(result.is_some());
-
-    let (ip_net, gateway) = result.unwrap();
+    let (ip_net, gateway) = ri.next().unwrap();
     assert_eq!(ip_net.ip(), IpAddr::from_str("10.1.0.1").unwrap());
     assert_eq!(ip_net.prefix(), 16u8);
     assert_eq!(gateway, IpAddr::from_str("10.1.0.4").unwrap());
+
+    ri.next();
+    ri.next();
+
+    let (ip_net, gateway) = ri.next().unwrap();
+    assert_eq!(ip_net.ip(), IpAddr::from_str("10.1.0.5").unwrap());
+
+    assert!(ri.next().is_none());
   }
 }

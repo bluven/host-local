@@ -5,7 +5,7 @@ use std::net::{AddrParseError, IpAddr};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-enum StoreError {
+pub enum StoreError {
     #[error("io error happened: {0}")]
     IOError(IoError),
 
@@ -13,7 +13,7 @@ enum StoreError {
     AddrParseError(AddrParseError),
 }
 
-trait Store {
+pub trait Store {
     fn lock(&self) -> Result<(), StoreError>;
     fn unlock(&self) -> Result<(), StoreError>;
     fn close(&self) -> Result<(), StoreError>;
